@@ -7,6 +7,7 @@ const required = [
   'RPC_URL',
   'PONS_FACTORY_ADDRESS',
   'POTATO_FACTORY_ADDRESS',
+  'PEW_FACTORY_ADDRESS',
   'BLOCKSCOUT_API_URL',
 ];
 
@@ -28,6 +29,7 @@ module.exports = {
   contracts: {
     pons:   process.env.PONS_FACTORY_ADDRESS,
     potato: process.env.POTATO_FACTORY_ADDRESS,
+    pew:    process.env.PEW_FACTORY_ADDRESS,
   },
   blockscout: {
     apiUrl: process.env.BLOCKSCOUT_API_URL,

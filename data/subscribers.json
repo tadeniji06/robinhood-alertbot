@@ -10,5 +10,18 @@
     "username": "skulldraww",
     "firstName": "Kim",
     "joinedAt": "2026-07-18T20:43:46.826Z"
+  },
+  "7894254109": {
+    "chatId": "7894254109",
+    "username": "usertry_an",
+    "firstName": "Outter",
+    "joinedAt": "2026-07-19T11:46:55.389Z"
+  },
+  "-5473125167": {
+    "chatId": "-5473125167",
+    "type": "group",
+    "name": "Test",
+    "username": null,
+    "joinedAt": "2026-07-20T00:50:10.195Z"
   }
 }

@@ -19,6 +19,7 @@ async function enrichToken(params) {
     launchpad,
     name: eventName,
     symbol: eventSymbol,
+    description: eventDesc,
     imageURI,
     website,
     twitter,
@@ -33,7 +34,7 @@ async function enrichToken(params) {
   // ── 1. Token metadata — Blockscout first ─────────────────────────────────
   let name        = eventName  || null;
   let symbol      = eventSymbol || null;
-  let totalSupply = 'Unknown';
+  let totalSupply = '0';
   let decimals    = 18;
 
   const bsToken = await blockscout.getTokenInfo(tokenAddress);
@@ -65,7 +66,6 @@ async function enrichToken(params) {
       symbol      = symbol || rawSymbol;
       decimals    = Number(rawDecimals);
       totalSupply = rawSupply.toString();
-      // Destroy provider immediately to avoid background polling
       if (provider.destroy) provider.destroy();
     } catch (rpcErr) {
       logger.warn('enricher', `RPC fallback failed: ${rpcErr.message}`);
@@ -73,10 +73,11 @@ async function enrichToken(params) {
   }
 
   // ── 2. Format supply ─────────────────────────────────────────────────────
+  let supplyRaw       = BigInt(0);
   let supplyFormatted = 'Unknown';
   try {
-    const raw = BigInt(totalSupply);
-    const formatted = ethers.formatUnits(raw, decimals);
+    supplyRaw = BigInt(totalSupply);
+    const formatted = ethers.formatUnits(supplyRaw, decimals);
     const num = parseFloat(formatted);
     supplyFormatted = isNaN(num)
       ? 'Unknown'
@@ -85,16 +86,22 @@ async function enrichToken(params) {
     supplyFormatted = 'Unknown';
   }
 
-  // ── 3. Dev buy ────────────────────────────────────────────────────────────
-  let devBuyAmount = null;
-  let devBuyPct    = null;
+  // ── 3. Dev buy + price calculation ───────────────────────────────────────
+  let devBuyAmount   = null;
+  let devBuyPct      = null;
+  let tokenPriceEth  = null;   // price per 1 token in ETH
+  let supplyNum      = 0;
+
+  try { supplyNum = parseFloat(ethers.formatUnits(supplyRaw, decimals)); } catch {}
 
   if (devBuyTokens && devBuyTokens !== '0') {
     try {
-      const tokensNum = parseFloat(ethers.formatUnits(BigInt(devBuyTokens), decimals));
+      const tokensNum  = parseFloat(ethers.formatUnits(BigInt(devBuyTokens), decimals));
+      const ethNum     = parseFloat(ethers.formatEther(BigInt(devBuyEth || '0')));
       devBuyAmount = tokensNum.toLocaleString('en-US', { maximumFractionDigits: 0 });
-      const supplyNum = parseFloat(ethers.formatUnits(BigInt(totalSupply || '0'), decimals));
       if (supplyNum > 0) devBuyPct = ((tokensNum / supplyNum) * 100).toFixed(2);
+      // Initial price = ETH spent / tokens received
+      if (tokensNum > 0 && ethNum > 0) tokenPriceEth = ethNum / tokensNum;
     } catch {
       devBuyAmount = devBuyTokens;
     }
@@ -107,10 +114,26 @@ async function enrichToken(params) {
     }
   }
 
-  // ── 4. Creator previous token count ──────────────────────────────────────
-  const prevTokenCount = await blockscout.getCreatorTokenCount(creatorAddress);
+  // ── 4. Market cap ─────────────────────────────────────────────────────────
+  let marketCapEth = null;
+  let marketCapUsd = null;
 
-  // ── 5. Format date/time ──────────────────────────────────────────────────
+  if (tokenPriceEth !== null && supplyNum > 0) {
+    marketCapEth = tokenPriceEth * supplyNum;
+  }
+
+  // ── 5. Creator info (parallel) ────────────────────────────────────────────
+  const [prevTokenCount, devBalance, ethPriceUsd] = await Promise.all([
+    blockscout.getCreatorTokenCount(creatorAddress),
+    blockscout.getDevBalance(creatorAddress),
+    blockscout.getEthPrice(),
+  ]);
+
+  if (marketCapEth !== null && ethPriceUsd) {
+    marketCapUsd = marketCapEth * ethPriceUsd;
+  }
+
+  // ── 6. Format date/time ──────────────────────────────────────────────────
   const dt = new Date(timestamp);
   const dateFormatted = dt.toLocaleDateString('en-US', {
     year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC',
@@ -119,6 +142,16 @@ async function enrichToken(params) {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
     timeZone: 'UTC', hour12: false,
   });
+  let finalImageURI = imageURI || (bsToken ? bsToken.icon_url : null) || null;
+  if (!finalImageURI) {
+    if (launchpad === 'Pons') {
+      finalImageURI = 'https://www.google.com/s2/favicons?sz=256&domain_url=https://pons.family';
+    } else if (launchpad === 'Potato Pad') {
+      finalImageURI = 'https://www.google.com/s2/favicons?sz=256&domain_url=https://potato.fm';
+    } else if (launchpad === 'Pew.fun') {
+      finalImageURI = 'https://www.google.com/s2/favicons?sz=256&domain_url=https://pew.fun';
+    }
+  }
 
   return {
     tokenAddress,
@@ -128,17 +161,23 @@ async function enrichToken(params) {
     dateFormatted,
     timeFormatted,
     launchpad,
-    name:         name    || 'Unknown',
-    symbol:       symbol  || '???',
-    totalSupply:  supplyFormatted,
+    name:          name    || 'Unknown',
+    symbol:        symbol  || '???',
+    description:   eventDesc || null,
+    totalSupply:   supplyFormatted,
     decimals,
     devBuyAmount,
     devBuyPct,
+    tokenPriceEth,
+    marketCapEth,
+    marketCapUsd,
+    ethPriceUsd,
     prevTokenCount,
-    imageURI:  imageURI  || null,
-    website:   website   || null,
-    twitter:   twitter   || null,
-    telegram:  telegram  || null,
+    devBalance:    devBalance || null,
+    imageURI:      finalImageURI,
+    website:       website   || null,
+    twitter:       twitter   || null,
+    telegram:      telegram  || null,
   };
 }
 

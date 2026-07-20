@@ -8,7 +8,8 @@
     "dev": "node --watch src/index.js",
     "test:pons": "node scripts/test-alert.js pons",
     "test:potato": "node scripts/test-alert.js potato",
-    "test:both": "node scripts/test-alert.js both"
+    "test:pew": "node scripts/test-alert.js pew",
+    "test:all": "node scripts/test-alert.js all"
   },
   "dependencies": {
     "axios": "^1.7.2",

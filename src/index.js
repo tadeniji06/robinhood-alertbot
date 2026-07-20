@@ -5,6 +5,7 @@ require('dotenv').config();
 const config         = require('./config');
 const PonsListener   = require('./listeners/ponsListener');
 const PotatoListener = require('./listeners/potatoListener');
+const PewListener    = require('./listeners/pewListener');
 const { enrichToken }  = require('./enrichers/tokenEnricher');
 const { formatAlert }  = require('./formatters/alertFormatter');
 const telegramBot      = require('./bot/telegramBot');
@@ -20,7 +21,7 @@ async function handleNewToken(rawToken) {
     // No provider passed — enricher uses Blockscout API only
     const enriched = await enrichToken(rawToken);
     const message  = formatAlert(enriched);
-    await telegramBot.broadcastAlert(message);
+    await telegramBot.broadcastAlert(message, enriched.imageURI);
   } catch (err) {
     logger.error('main', `Failed to process token ${rawToken.tokenAddress}:`, err.message);
   }
@@ -47,17 +48,21 @@ async function main() {
   // Create & start listeners (Blockscout-based — zero RPC calls)
   const ponsListener   = new PonsListener();
   const potatoListener = new PotatoListener();
+  const pewListener    = new PewListener();
 
   ponsListener.on('newToken',   handleNewToken);
   potatoListener.on('newToken', handleNewToken);
+  pewListener.on('newToken',    handleNewToken);
 
   await ponsListener.start();
   await potatoListener.start();
+  await pewListener.start();
 
   const subCount = db.count();
   logger.info('main', `✅ All listeners active — ${subCount} subscriber(s)`);
   logger.info('main', `📡 Polling Pons:    ${config.contracts.pons}`);
   logger.info('main', `🥔 Polling Potato:  ${config.contracts.potato}`);
+  logger.info('main', `🎯 Polling Pew:     ${config.contracts.pew}`);
   logger.info('main', `⏱  Poll interval:  ${config.polling.intervalMs}ms`);
 
   // Print shareable bot link
@@ -73,6 +78,7 @@ async function main() {
     logger.info('main', `${signal} received — shutting down…`);
     ponsListener.stop();
     potatoListener.stop();
+    pewListener.stop();
     logger.info('main', 'Goodbye 👋');
     process.exit(0);
   };

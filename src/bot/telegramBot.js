@@ -27,46 +27,65 @@ function init() {
   });
 
   // ── /start ────────────────────────────────────────────────────────────────
-  bot.onText(/\/start/, async (msg) => {
-    const chatId = msg.chat.id;
-    const user   = msg.from;
-    const isNew  = db.addSubscriber(user);
-    const name   = user.first_name || user.username || 'there';
+  bot.onText(/\/start(@\w+)?/, async (msg) => {
+    const chatId  = msg.chat.id;
+    const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup' || msg.chat.type === 'channel';
+    const isNew   = db.addSubscriber(msg);
+    const name    = isGroup
+      ? (msg.chat.title || 'this group')
+      : (msg.from?.first_name || msg.from?.username || 'there');
 
     if (isNew) {
-      const welcome = [
+      const welcome = isGroup ? [
+        `👋 <b>Hey! Robinhood Chain Alert Bot is now active in ${esc(name)}!</b>`,
+        ``,
+        `🔔 This group will receive <b>live token launch alerts</b> for:`,
+        `  🌉 <b>Pons</b> — pons.family/launchpad`,
+        `  🥔 <b>Potato Pad</b> — potato.fm`,
+        `  🎯 <b>Pew.fun</b> — pew.fun`,
+        ``,
+        `Every new token launch will be posted here automatically.`,
+        ``,
+        `<b>Commands:</b>`,
+        `  /start — Activate alerts`,
+        `  /stop  — Deactivate alerts`,
+        `  /stats — Bot stats`,
+        ``,
+        `<i>⚠️ Not financial advice. Always DYOR.</i>`,
+      ].join('\n') : [
         `👋 <b>Hey ${esc(name)}! Welcome to the Robinhood Chain Alert Bot.</b>`,
         ``,
         `🔔 You're now <b>subscribed to live token alerts</b>!`,
         ``,
         `Every time a new token launches on:`,
-        `  🌉 <b>Pons</b> — <a href="https://pons.family/launchpad">pons.family/launchpad</a>`,
-        `  🥔 <b>Potato Pad</b> — <a href="https://potato.fm">potato.fm</a>`,
+        `  🌉 <b>Pons</b> — pons.family/launchpad`,
+        `  🥔 <b>Potato Pad</b> — potato.fm`,
+        `  🎯 <b>Pew.fun</b> — pew.fun`,
         ``,
-        `…you'll get an instant alert right here in your DMs.`,
+        `…you'll get an instant alert right here.`,
         ``,
         `<b>Commands:</b>`,
         `  /start — Subscribe to alerts`,
         `  /stop  — Unsubscribe from alerts`,
-        `  /stats — See bot subscriber stats`,
+        `  /stats — See bot stats`,
         ``,
-        `<i>⚠️ All alerts are for informational purposes only. DYOR — Not financial advice.</i>`,
+        `<i>⚠️ Not financial advice. Always DYOR.</i>`,
       ].join('\n');
 
       await safeSend(chatId, welcome);
     } else {
       await safeSend(chatId,
-        `✅ <b>You're already subscribed!</b>\n\nYou'll receive automatic alerts for every new token launch on Robinhood Chain.\n\nSend /stop to unsubscribe at any time.`
+        `✅ <b>Already subscribed!</b>\n\nAlerts are active. Send /stop to deactivate.`
       );
     }
   });
 
   // ── /stop ─────────────────────────────────────────────────────────────────
-  bot.onText(/\/stop/, async (msg) => {
+  bot.onText(/\/stop(@\w+)?/, async (msg) => {
     const chatId = msg.chat.id;
     db.removeSubscriber(chatId);
     await safeSend(chatId,
-      `🚫 <b>You've been unsubscribed.</b>\n\nYou won't receive any more token alerts.\n\nSend /start to re-subscribe anytime.`
+      `🚫 <b>Alerts deactivated.</b>\n\nYou won't receive any more token alerts.\n\nSend /start to re-activate anytime.`
     );
   });
 
@@ -93,33 +112,77 @@ function init() {
 
 // ── Broadcast ─────────────────────────────────────────────────────────────────
 
+// Helper to resolve IPFS to HTTP gateway
+function resolveImage(uri) {
+  if (!uri) return null;
+  if (uri.startsWith('ipfs://')) {
+    return `https://dweb.link/ipfs/${uri.replace('ipfs://', '')}`;
+  }
+  return uri;
+}
+
 /**
  * Broadcasts an HTML alert to ALL subscribers.
  * Automatically removes subscribers who have blocked the bot.
  * @param {string} html
+ * @param {string} [imageUrl]
  * @returns {Promise<{ sent: number, failed: number }>}
  */
-async function broadcastAlert(html) {
+async function broadcastAlert(html, imageUrl = null) {
   if (!bot) init();
   const ids = db.getAllIds();
 
-  if (ids.length === 0) {
-    logger.warn('telegram', 'No subscribers — nobody to send alert to.');
-    return { sent: 0, failed: 0 };
-  }
+  if (ids.length === 0) return { sent: 0, failed: 0 };
 
-  logger.info('telegram', `📢 Broadcasting to ${ids.length} subscribers…`);
-  let sent = 0, failed = 0;
+  let sent = 0;
+  let failed = 0;
+
+  // Fetch image buffer if available
+  let imageBuffer = null;
+  if (imageUrl) {
+    try {
+      const resolvedUrl = resolveImage(imageUrl);
+      const axios = require('axios');
+      const res = await axios.get(resolvedUrl, { responseType: 'arraybuffer', timeout: 5000 });
+      imageBuffer = Buffer.from(res.data, 'binary');
+    } catch (err) {
+      logger.warn('telegram', `Failed to download image from ${imageUrl}: ${err.message}`);
+    }
+  }
 
   for (const chatId of ids) {
     try {
-      await retry(
-        () => bot.sendMessage(chatId, html, {
-          parse_mode: 'HTML',
-          disable_web_page_preview: true,
-        }),
-        3, 1000, `broadcast.${chatId}`
-      );
+      if (imageBuffer) {
+        try {
+          await retry(
+            () => bot.sendPhoto(chatId, imageBuffer, {
+              caption: html,
+              parse_mode: 'HTML',
+            }, {
+              filename: 'token_image.png',
+              contentType: 'image/png'
+            }),
+            3, 1000, `broadcast.photo.${chatId}`
+          );
+        } catch (err) {
+          logger.warn('telegram', `Failed to send photo buffer to ${chatId}, falling back to text:`, err.message);
+          await retry(
+            () => bot.sendMessage(chatId, html, {
+              parse_mode: 'HTML',
+              disable_web_page_preview: true,
+            }),
+            3, 1000, `broadcast.text.${chatId}`
+          );
+        }
+      } else {
+        await retry(
+          () => bot.sendMessage(chatId, html, {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true,
+          }),
+          3, 1000, `broadcast.${chatId}`
+        );
+      }
       sent++;
       // Respect Telegram rate limits: ~30 messages/sec max
       await sleep(40);

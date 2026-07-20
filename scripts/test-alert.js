@@ -31,10 +31,16 @@ const MOCK_PONS = {
   launchpad:      'Pons',
   name:           'Test Moon Coin',
   symbol:         'TMOON',
+  description:    null,
   totalSupply:    '1,000,000,000',
   decimals:       18,
   devBuyAmount:   '0.2000 ETH',
   devBuyPct:      null,
+  tokenPriceEth:  0.00000000021,
+  marketCapEth:   0.21,
+  marketCapUsd:   396.78,
+  ethPriceUsd:    1889.43,
+  devBalance:     '2.4500 ETH',
   prevTokenCount: 2,
   imageURI:       null,
   website:        'https://example.com',
@@ -42,6 +48,32 @@ const MOCK_PONS = {
   telegram:       'https://t.me/testmoon',
 };
 
+const MOCK_PEW = {
+  tokenAddress:   '0x04f8a02CB4dA475827fC6d39B31cf55018CEc425',
+  creatorAddress: '0x52F8e3D351f0bA2071119311A7769FCd9f9AE7d8',
+  txHash:         '0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
+  timestamp:      new Date().toISOString(),
+  dateFormatted:  new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }),
+  timeFormatted:  new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'UTC', hour12: false }),
+  launchpad:      'Pew.fun',
+  name:           'Alux Ushi',
+  symbol:         'ALUX',
+  description:    'The legendary Alux from Mayan folklore, now on Robinhood Chain. A mischievous creature guarding hidden treasures.',
+  totalSupply:    '1,000,000,000',
+  decimals:       18,
+  devBuyAmount:   null,
+  devBuyPct:      null,
+  tokenPriceEth:  null,
+  marketCapEth:   null,
+  marketCapUsd:   null,
+  ethPriceUsd:    1889.43,
+  devBalance:     '3.1415 ETH',
+  prevTokenCount: 0,
+  imageURI:       null,
+  website:        null,
+  twitter:        'https://x.com/aluxushi',
+  telegram:       null,
+};
 const MOCK_POTATO = {
   tokenAddress:   '0x1e4d3243a287EDb687A4cBf2A1223dA54E8c835f',
   creatorAddress: '0x400bbdaA30D4AE46dcF9bf123e8256fdb4dC36Ba',
@@ -52,10 +84,17 @@ const MOCK_POTATO = {
   launchpad:      'Potato Pad',
   name:           'Chip',
   symbol:         'CHIP',
+  description:    null,
   totalSupply:    '999,999,999',
   decimals:       18,
   devBuyAmount:   '16,162,210',
   devBuyPct:      '1.62',
+  // price = 0.05 ETH / 16,162,210 tokens
+  tokenPriceEth:  0.05 / 16162210,
+  marketCapEth:   (0.05 / 16162210) * 999999999,
+  marketCapUsd:   (0.05 / 16162210) * 999999999 * 1889.43,
+  ethPriceUsd:    1889.43,
+  devBalance:     '0.0500 ETH',
   prevTokenCount: 0,
   imageURI:       'ipfs://QmZCSUufjazNbdwKtbZVPyY1dFshqoAnMuajQys6ub3sp9',
   website:        null,
@@ -81,10 +120,14 @@ async function run() {
   telegramBot.init();
 
   const tests = [];
-  if (arg === 'both') {
+  if (arg === 'all') {
+    tests.push(MOCK_PONS, MOCK_POTATO, MOCK_PEW);
+  } else if (arg === 'both') {
     tests.push(MOCK_PONS, MOCK_POTATO);
   } else if (arg === 'potato') {
     tests.push(MOCK_POTATO);
+  } else if (arg === 'pew') {
+    tests.push(MOCK_PEW);
   } else {
     tests.push(MOCK_PONS);
   }
@@ -100,7 +143,7 @@ async function run() {
     console.log(message.replace(/<[^>]+>/g, ''));  // strip HTML for terminal
     console.log('─'.repeat(60) + '\n');
 
-    const { sent, failed } = await telegramBot.broadcastAlert(message);
+    const { sent, failed } = await telegramBot.broadcastAlert(message, mockToken.imageURI);
     logger.info('test', `✅ Done — sent: ${sent}, failed: ${failed}`);
 
     if (tests.length > 1) {

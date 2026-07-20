@@ -6,16 +6,11 @@ const logger = require('../utils/logger');
 
 const DB_PATH = path.join(__dirname, '../../data/subscribers.json');
 
-// Ensure data directory exists
 function ensureDir() {
   const dir = path.dirname(DB_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-/**
- * Loads all subscribers from disk.
- * @returns {{ [chatId: string]: { chatId: string, username?: string, firstName?: string, joinedAt: string } }}
- */
 function load() {
   ensureDir();
   if (!fs.existsSync(DB_PATH)) return {};
@@ -26,37 +21,43 @@ function load() {
   }
 }
 
-/**
- * Saves subscriber map to disk.
- * @param {Object} data
- */
 function save(data) {
   ensureDir();
   fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), 'utf8');
 }
 
 /**
- * Adds a subscriber. Returns true if newly added, false if already existed.
- * @param {object} user - Telegram user object from message
- * @returns {boolean}
+ * Adds a subscriber by chat ID (works for private users AND groups/channels).
+ * @param {object} msg - Full Telegram message object
+ * @returns {boolean} true if newly added
  */
-function addSubscriber(user) {
+function addSubscriber(msg) {
   const db = load();
-  const id = String(user.id);
-  const isNew = !db[id];
-  db[id] = {
-    chatId:    id,
-    username:  user.username  || null,
-    firstName: user.first_name || null,
-    joinedAt:  new Date().toISOString(),
+  const chatId = String(msg.chat.id);
+  const isNew  = !db[chatId];
+
+  const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup' || msg.chat.type === 'channel';
+
+  db[chatId] = {
+    chatId,
+    type:      msg.chat.type,
+    // For groups/channels store the group name; for private chats store the user
+    name:      isGroup
+      ? (msg.chat.title || 'Group')
+      : (msg.from?.first_name || msg.from?.username || 'User'),
+    username:  isGroup ? null : (msg.from?.username || null),
+    joinedAt:  db[chatId]?.joinedAt || new Date().toISOString(),
   };
   save(db);
-  if (isNew) logger.info('subscribers', `✅ New subscriber: ${user.first_name || user.username || id}`);
+
+  if (isNew) {
+    logger.info('subscribers', `✅ New subscriber: ${db[chatId].name} (${msg.chat.type}) [${chatId}]`);
+  }
   return isNew;
 }
 
 /**
- * Removes a subscriber.
+ * Removes a subscriber by chat ID.
  * @param {string|number} chatId
  */
 function removeSubscriber(chatId) {
@@ -70,7 +71,7 @@ function removeSubscriber(chatId) {
 }
 
 /**
- * Returns all subscriber chat IDs as an array of strings.
+ * Returns all subscriber chat IDs.
  * @returns {string[]}
  */
 function getAllIds() {

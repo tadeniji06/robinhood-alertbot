@@ -1,24 +1,12 @@
 'use strict';
 
-const config = require('../config');
-
 const EXPLORER = 'https://robinhoodchain.blockscout.com';
 
-/**
- * Truncates an Ethereum address for display.
- * @param {string} addr
- * @returns {string} e.g. 0x1234...5678
- */
 function shortAddr(addr) {
   if (!addr) return 'Unknown';
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
-/**
- * Escapes characters that have special meaning in Telegram HTML mode.
- * @param {string} str
- * @returns {string}
- */
 function esc(str) {
   if (!str) return '';
   return String(str)
@@ -27,92 +15,129 @@ function esc(str) {
     .replace(/>/g, '&gt;');
 }
 
-/**
- * Builds the launchpad-specific branding header.
- */
-function buildHeader(launchpad) {
-  if (launchpad === 'Pons') {
-    return `🌉 <b>New Token on Pons</b> 🌉`;
+function fmtEth(val, decimals = 8) {
+  if (val === null || val === undefined) return null;
+  const n = Number(val);
+  if (isNaN(n)) return null;
+  if (n < 0.000001 && n > 0) {
+    return n.toExponential(4) + ' ETH';
   }
-  return `🥔 <b>New Token on Potato Pad</b> 🥔`;
+  return n.toFixed(decimals).replace(/\.?0+$/, '') + ' ETH';
 }
 
-/**
- * Builds the socials line.
- */
+function fmtUsd(val) {
+  if (val === null || val === undefined) return null;
+  const n = Number(val);
+  if (isNaN(n)) return null;
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(2)}K`;
+  return `$${n.toFixed(2)}`;
+}
+
+function buildHeader(launchpad) {
+  return `🚀 <b>New Token on ${esc(launchpad)}</b> 🚀`;
+}
+
 function buildSocials(token) {
   const parts = [];
-  if (token.twitter)  parts.push(`<a href="${esc(token.twitter)}">𝕏 Twitter</a>`);
-  if (token.telegram) parts.push(`<a href="${esc(token.telegram)}">✈️ Telegram</a>`);
-  if (token.website)  parts.push(`<a href="${esc(token.website)}">🌐 Website</a>`);
-  return parts.length > 0 ? parts.join('  |  ') : 'None';
+  if (token.twitter)  parts.push(`<a href="${esc(token.twitter)}">Twitter</a>`);
+  if (token.telegram) parts.push(`<a href="${esc(token.telegram)}">Telegram</a>`);
+  if (token.website)  parts.push(`<a href="${esc(token.website)}">Website</a>`);
+  return parts.length > 0 ? parts.join(' | ') : 'None';
 }
 
-/**
- * Builds the launchpad trade link.
- */
 function buildTradeLink(token) {
   if (token.launchpad === 'Pons') {
-    return `<a href="https://pons.family/launchpad/${token.tokenAddress}">Trade $${esc(token.symbol)} on Pons</a>`;
+    return `<a href="https://pons.family/launchpad/${token.tokenAddress}">Trade $${esc(token.symbol)} on Pons ↗️</a>`;
   }
-  return `<a href="https://potato.fm/token/${token.tokenAddress}">Trade $${esc(token.symbol)} on Potato Pad</a>`;
+  if (token.launchpad === 'Potato Pad') {
+    return `<a href="https://potato.fm/token/${token.tokenAddress}">Trade $${esc(token.symbol)} on Potato Pad ↗️</a>`;
+  }
+  return `<a href="https://pew.fun/token/${token.tokenAddress}">Trade $${esc(token.symbol)} on Pew.fun ↗️</a>`;
 }
 
 /**
  * Formats an enriched token object into a Telegram HTML alert message.
+ * Matches requested "MemeJob" screenshot layout structure.
  *
- * @param {Object} token - enriched token data from tokenEnricher
- * @returns {string} Telegram HTML message
+ * @param {Object} token
+ * @returns {string}
  */
 function formatAlert(token) {
-  const creatorShort = shortAddr(token.creatorAddress);
-  const creatorExplorerUrl = `${EXPLORER}/address/${token.creatorAddress}`;
-  const tokenExplorerUrl   = `${EXPLORER}/token/${token.tokenAddress}`;
-  const txExplorerUrl      = `${EXPLORER}/tx/${token.txHash}`;
+  const creatorShort    = shortAddr(token.creatorAddress);
+  const creatorExplorer = `${EXPLORER}/address/${token.creatorAddress}`;
 
-  // Dev buy line
-  let devBuyLine;
-  if (token.devBuyAmount) {
-    devBuyLine = `💰 <b>Dev Buy:</b> ${esc(token.devBuyAmount)}${token.devBuyPct ? ` (${token.devBuyPct}% of supply)` : ''}`;
-  } else {
-    devBuyLine = `💰 <b>Dev Buy:</b> None detected`;
+  // ── Price & Market Cap ────────────────────────────────────────────────────
+  const priceEthStr = fmtEth(token.tokenPriceEth, 10);
+  const mcapEthStr  = fmtEth(token.marketCapEth, 4);
+  const mcapUsdStr  = fmtUsd(token.marketCapUsd);
+
+  // ── Details Section ───────────────────────────────────────────────────────
+  const details = [
+    `<b>Details</b>`,
+    `├─ 🏛 <b>Name:</b> ${esc(token.name)}`,
+    `├─ 🆔 <b>Token CA:</b> <code>${token.tokenAddress}</code>`,
+    `├─ 💲 <b>Symbol:</b> $${esc(token.symbol)}`,
+    `├─ 📦 <b>Supply:</b> ${esc(token.totalSupply)}`
+  ];
+
+  if (priceEthStr) {
+    details.push(`├─ 📈 <b>Price:</b> ${priceEthStr}${token.ethPriceUsd ? ` (~$${(token.tokenPriceEth * token.ethPriceUsd).toFixed(8)})` : ''}`);
   }
 
-  // Previous tokens line
-  const prevLine = token.prevTokenCount > 0
-    ? `🔁 <b>Prev Tokens by Creator:</b> ${token.prevTokenCount}`
-    : `🆕 <b>Creator:</b> First token launched`;
+  if (mcapEthStr || mcapUsdStr) {
+    const parts = [];
+    if (mcapEthStr) parts.push(mcapEthStr);
+    if (mcapUsdStr) parts.push(mcapUsdStr);
+    details.push(`├─ 💹 <b>Market Cap:</b> ${parts.join(' · ')}`);
+  }
 
-  const divider = '━━━━━━━━━━━━━━━━━━━';
+  if (token.description) {
+    details.push(`└─ 📄 <b>Description 👇</b>`);
+    details.push(``);
+    details.push(`<i>${esc(token.description.slice(0, 300))}${token.description.length > 300 ? '…' : ''}</i>`);
+  } else {
+    // If no description, replace last pipe with bottom corner
+    details[details.length - 1] = details[details.length - 1].replace('├─', '└─');
+  }
 
-  const message = [
+  // ── Creator Section ───────────────────────────────────────────────────────
+  const creatorInfo = [
+    `<b>Creator Info</b>`,
+    `├─ 🏦 <b>Owner:</b> <a href="${creatorExplorer}">${creatorShort}</a>`
+  ];
+
+  if (token.devBuyAmount) {
+    creatorInfo.push(`├─ 🪙 <b>Dev Buy:</b> ${esc(token.devBuyAmount)}${token.devBuyPct ? ` (${token.devBuyPct}%)` : ''}`);
+  } else {
+    creatorInfo.push(`├─ 🪙 <b>Dev Buy:</b> None`);
+  }
+
+  if (token.devBalance) {
+    creatorInfo.push(`├─ 💰 <b>ETH Balance:</b> ${esc(token.devBalance)}`);
+  }
+
+  const prevTokensStr = token.prevTokenCount > 0
+    ? `${token.prevTokenCount} other token(s)`
+    : `First token`;
+  
+  creatorInfo.push(`├─ 🔁 <b>Prev Tokens:</b> ${prevTokensStr}`);
+  creatorInfo.push(`└─ 👥 <b>Social:</b> ${buildSocials(token)}`);
+
+  // ── Combine All ───────────────────────────────────────────────────────────
+  const lines = [
     buildHeader(token.launchpad),
-    divider,
     '',
-    `📋 <b>Token Details</b>`,
-    `├─ 🏷  <b>Name:</b> ${esc(token.name)} (<code>$${esc(token.symbol)}</code>)`,
-    `├─ 📅 <b>Created:</b> ${esc(token.dateFormatted)} · ${esc(token.timeFormatted)} UTC`,
-    `├─ 🏗  <b>Launchpad:</b> ${esc(token.launchpad)}`,
-    `└─ 📦 <b>Total Supply:</b> ${esc(token.totalSupply)}`,
+    ...details,
     '',
-    `👤 <b>Creator Info</b>`,
-    `├─ 🔑 <b>Address:</b> <a href="${creatorExplorerUrl}">${creatorShort}</a>`,
-    `├─ ${devBuyLine}`,
-    `└─ ${prevLine}`,
+    ...creatorInfo,
     '',
-    `🌐 <b>Socials</b>`,
-    `└─ ${buildSocials(token)}`,
+    `├─ 🏬 <b>${buildTradeLink(token)}</b>`,
     '',
-    `🔗 <b>Links</b>`,
-    `├─ 📊 <a href="${tokenExplorerUrl}">View Token on Explorer</a>`,
-    `├─ 🧾 <a href="${txExplorerUrl}">View Launch Tx</a>`,
-    `└─ 💱 ${buildTradeLink(token)}`,
-    '',
-    divider,
-    `<i>⚠️ DYOR — Not financial advice.</i>`,
-  ].join('\n');
+    `<i>⚠️ DYOR — Not financial advice.</i>`
+  ];
 
-  return message;
+  return lines.join('\n');
 }
 
 module.exports = { formatAlert };

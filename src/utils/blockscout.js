@@ -78,6 +78,7 @@ async function getTokenInfo(tokenAddress) {
           symbol:      data.symbol      || '???',
           totalSupply: data.total_supply || '0',
           decimals:    data.decimals     ? Number(data.decimals) : 18,
+          icon_url:    data.icon_url     || null,
         };
       }
     } catch (err) {
@@ -118,4 +119,46 @@ async function getCreatorTokenCount(creatorAddress) {
   }
 }
 
-module.exports = { getLatestBlock, getNewLogs, getTokenInfo, getCreatorTokenCount };
+/**
+ * Fetches the native coin (ETH) balance of a wallet address.
+ * @param {string} address
+ * @returns {Promise<string|null>} formatted balance string e.g. "1.2345 ETH"
+ */
+async function getDevBalance(address) {
+  try {
+    const { data } = await retry(
+      () => http.get(`/addresses/${address}`),
+      2, 500, 'blockscout.devBalance'
+    );
+    if (data && data.coin_balance) {
+      const { ethers } = require('ethers');
+      const formatted = parseFloat(ethers.formatEther(data.coin_balance));
+      return `${formatted.toFixed(4)} ETH`;
+    }
+    return null;
+  } catch (err) {
+    logger.warn('blockscout', `getDevBalance failed for ${address}: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * Fetches the current ETH/USD price from Blockscout stats.
+ * @returns {Promise<number|null>} price in USD, or null if unavailable
+ */
+async function getEthPrice() {
+  try {
+    const { data } = await retry(
+      () => http.get('/stats'),
+      2, 500, 'blockscout.ethPrice'
+    );
+    const price = parseFloat(data?.coin_price);
+    return isNaN(price) ? null : price;
+  } catch (err) {
+    logger.warn('blockscout', `getEthPrice failed: ${err.message}`);
+    return null;
+  }
+}
+
+module.exports = { getLatestBlock, getNewLogs, getTokenInfo, getCreatorTokenCount, getDevBalance, getEthPrice };
+
