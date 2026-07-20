@@ -143,7 +143,7 @@ async function run() {
     console.log(message.replace(/<[^>]+>/g, ''));  // strip HTML for terminal
     console.log('─'.repeat(60) + '\n');
 
-    const { sent, failed } = await telegramBot.broadcastAlert(message, mockToken.imageURI);
+    const { sent, failed } = await telegramBot.broadcastAlert(message, mockToken.imageURI, mockToken.launchpad);
     logger.info('test', `✅ Done — sent: ${sent}, failed: ${failed}`);
 
     if (tests.length > 1) {

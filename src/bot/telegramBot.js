@@ -97,6 +97,13 @@ function init() {
     );
   });
 
+  // ── /chatid ───────────────────────────────────────────────────────────────
+  bot.onText(/\/chatid/, async (msg) => {
+    await safeSend(msg.chat.id,
+      `📌 <b>Chat ID:</b> <code>${msg.chat.id}</code>\n\n<i>Copy this ID into your .env file to route specific alerts here.</i>`
+    );
+  });
+
   // ── Error handler ─────────────────────────────────────────────────────────
   bot.on('polling_error', (err) => {
     logger.error('telegram', 'Polling error:', err.message);
@@ -122,17 +129,41 @@ function resolveImage(uri) {
 }
 
 /**
- * Broadcasts an HTML alert to ALL subscribers.
- * Automatically removes subscribers who have blocked the bot.
+ * Broadcasts an HTML alert.
+ * If segregated channels are configured in .env, sends ONLY to those channels.
+ * Otherwise, broadcasts to ALL subscribers.
+ * Automatically removes subscribers who have blocked the bot (in broadcast mode).
  * @param {string} html
  * @param {string} [imageUrl]
+ * @param {string} [launchpad]
  * @returns {Promise<{ sent: number, failed: number }>}
  */
-async function broadcastAlert(html, imageUrl = null) {
+async function broadcastAlert(html, imageUrl = null, launchpad = null) {
   if (!bot) init();
-  const ids = db.getAllIds();
+  
+  // 1. Determine Target IDs
+  const c = config.telegram.channels;
+  let targetIds = [];
+  let isSegregatedMode = false;
 
-  if (ids.length === 0) return { sent: 0, failed: 0 };
+  if (c.all || c.pons || c.potato || c.pew) {
+    isSegregatedMode = true;
+    if (c.all) targetIds.push(c.all);
+    
+    if (launchpad) {
+      if (launchpad.toLowerCase().includes('pons') && c.pons) targetIds.push(c.pons);
+      if (launchpad.toLowerCase().includes('potato') && c.potato) targetIds.push(c.potato);
+      if (launchpad.toLowerCase().includes('pew') && c.pew) targetIds.push(c.pew);
+    }
+    
+    // Deduplicate IDs (e.g. if 'all' is the same as 'pons')
+    targetIds = [...new Set(targetIds)];
+  } else {
+    // Fallback: send to everyone in subscribers.json
+    targetIds = db.getAllIds();
+  }
+
+  if (targetIds.length === 0) return { sent: 0, failed: 0 };
 
   let sent = 0;
   let failed = 0;
@@ -150,7 +181,7 @@ async function broadcastAlert(html, imageUrl = null) {
     }
   }
 
-  for (const chatId of ids) {
+  for (const chatId of targetIds) {
     try {
       if (imageBuffer) {
         try {
@@ -167,20 +198,14 @@ async function broadcastAlert(html, imageUrl = null) {
         } catch (err) {
           logger.warn('telegram', `Failed to send photo buffer to ${chatId}, falling back to text:`, err.message);
           await retry(
-            () => bot.sendMessage(chatId, html, {
-              parse_mode: 'HTML',
-              disable_web_page_preview: true,
-            }),
+            () => bot.sendMessage(chatId, html, { parse_mode: 'HTML', disable_web_page_preview: true }),
             3, 1000, `broadcast.text.${chatId}`
           );
         }
       } else {
         await retry(
-          () => bot.sendMessage(chatId, html, {
-            parse_mode: 'HTML',
-            disable_web_page_preview: true,
-          }),
-          3, 1000, `broadcast.${chatId}`
+          () => bot.sendMessage(chatId, html, { parse_mode: 'HTML', disable_web_page_preview: true }),
+          3, 1000, `broadcast.text.${chatId}`
         );
       }
       sent++;
@@ -188,6 +213,13 @@ async function broadcastAlert(html, imageUrl = null) {
       await sleep(40);
     } catch (err) {
       failed++;
+      logger.error('telegram', `Broadcast failed for ${chatId}:`, err.message);
+      
+      // Only auto-remove from DB if we are broadcasting to standard subscribers (not segregated channels)
+      if (!isSegregatedMode && err.message.includes('bot was blocked by the user')) {
+        db.removeSubscriber(chatId);
+      }
+      
       const code = err?.response?.body?.error_code;
       // 403 = user blocked bot, 400 chat not found → remove subscriber
       if (code === 403 || code === 400) {

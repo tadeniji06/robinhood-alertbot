@@ -21,7 +21,7 @@ async function handleNewToken(rawToken) {
     // No provider passed — enricher uses Blockscout API only
     const enriched = await enrichToken(rawToken);
     const message  = formatAlert(enriched);
-    await telegramBot.broadcastAlert(message, enriched.imageURI);
+    await telegramBot.broadcastAlert(message, enriched.imageURI, rawToken.launchpad);
   } catch (err) {
     logger.error('main', `Failed to process token ${rawToken.tokenAddress}:`, err.message);
   }

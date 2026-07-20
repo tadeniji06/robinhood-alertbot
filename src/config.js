@@ -21,6 +21,12 @@ for (const key of required) {
 module.exports = {
   telegram: {
     token: process.env.Telegram_Bot_Token,
+    channels: {
+      all:    process.env.CHANNEL_ID_ALL    || null,
+      pons:   process.env.CHANNEL_ID_PONS   || null,
+      potato: process.env.CHANNEL_ID_POTATO || null,
+      pew:    process.env.CHANNEL_ID_PEW    || null,
+    }
   },
   rpc: {
     url: process.env.RPC_URL,
