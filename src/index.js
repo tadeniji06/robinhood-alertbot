@@ -3,6 +3,7 @@
 require('dotenv').config();
 
 const config         = require('./config');
+const { ethers }     = require('ethers');
 const PonsListener   = require('./listeners/ponsListener');
 const PotatoListener = require('./listeners/potatoListener');
 const PewListener    = require('./listeners/pewListener');
@@ -11,7 +12,6 @@ const { formatAlert }  = require('./formatters/alertFormatter');
 const telegramBot      = require('./bot/telegramBot');
 const logger           = require('./utils/logger');
 const db               = require('./db/subscribers');
-const blockscout       = require('./utils/blockscout');
 
 // ── Event pipeline ────────────────────────────────────────────────────────────
 
@@ -33,30 +33,40 @@ async function main() {
   logger.info('main', '🚀 Robinhood Alert Bot starting…');
   logger.info('main', `Chain ID: ${config.rpc.chainId}`);
 
-  // Verify Blockscout is reachable (our primary data source)
-  try {
-    const latestBlock = await blockscout.getLatestBlock();
-    logger.info('main', `✅ Blockscout connected — latest block: ${latestBlock}`);
-  } catch (err) {
-    logger.error('main', '❌ Cannot reach Blockscout API:', err.message);
-    process.exit(1);
+  // Create primary blockchain provider
+  const provider = new ethers.JsonRpcProvider(config.rpc.url, undefined, {
+    staticNetwork: true,
+    polling: false,
+  });
+
+  // Verify RPC is reachable and wait for network if DNS is temporarily down
+  let latestBlock = null;
+  const { sleep } = require('./utils/retry');
+  while (latestBlock === null) {
+    try {
+      latestBlock = await provider.getBlockNumber();
+      logger.info('main', `✅ RPC connected — latest block: ${latestBlock}`);
+    } catch (err) {
+      logger.error('main', `RPC connection failed (${err.message}), retrying in 5s...`);
+      await sleep(5000);
+    }
   }
 
   // Start interactive Telegram bot (polling for /start, /stop, /stats)
-  telegramBot.init();
+  telegramBot.init(db);
 
-  // Create & start listeners (Blockscout-based — zero RPC calls)
-  const ponsListener   = new PonsListener();
-  const potatoListener = new PotatoListener();
-  const pewListener    = new PewListener();
+  // ── Listeners ───────────────────────────────────────────────────────────────
+  const pons   = new PonsListener(provider);
+  const potato = new PotatoListener(provider);
+  const pew    = new PewListener(provider);
 
-  ponsListener.on('newToken',   handleNewToken);
-  potatoListener.on('newToken', handleNewToken);
-  pewListener.on('newToken',    handleNewToken);
+  pons.on('newToken',   handleNewToken);
+  potato.on('newToken', handleNewToken);
+  pew.on('newToken',    handleNewToken);
 
-  await ponsListener.start();
-  await potatoListener.start();
-  await pewListener.start();
+  await pons.start();
+  await potato.start();
+  await pew.start();
 
   const subCount = db.count();
   logger.info('main', `✅ All listeners active — ${subCount} subscriber(s)`);

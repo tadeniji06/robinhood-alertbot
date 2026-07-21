@@ -14,50 +14,7 @@ const http = axios.create({
   headers: { 'Accept': 'application/json' },
 });
 
-// ── Block number ──────────────────────────────────────────────────────────────
 
-/**
- * Returns the latest block number from Blockscout stats.
- * @returns {Promise<number>}
- */
-async function getLatestBlock() {
-  const { data } = await retry(
-    () => http.get('/stats'),
-    3, 1000, 'blockscout.getLatestBlock'
-  );
-  // total_blocks is the count; latest block index = count - 1, but
-  // Blockscout returns total_blocks as the actual latest block number.
-  return Number(data.total_blocks);
-}
-
-// ── Contract logs ─────────────────────────────────────────────────────────────
-
-/**
- * Fetches the most recent logs for a contract address.
- * Blockscout returns logs newest-first; we filter to those after `afterBlock`.
- *
- * @param {string} address    - contract address
- * @param {number} afterBlock - only return logs with block_number > afterBlock
- * @returns {Promise<Array>}  - log items, ascending by block_number
- */
-async function getNewLogs(address, afterBlock) {
-  try {
-    const { data } = await retry(
-      () => http.get(`/addresses/${address}/logs`),
-      3, 1000, `blockscout.getLogs.${address.slice(0, 8)}`
-    );
-
-    if (!data || !data.items) return [];
-
-    // Filter to only new logs and sort ascending
-    return data.items
-      .filter((item) => Number(item.block_number) > afterBlock)
-      .sort((a, b) => Number(a.block_number) - Number(b.block_number));
-  } catch (err) {
-    logger.warn('blockscout', `getLogs failed for ${address}: ${err.message}`);
-    return [];
-  }
-}
 
 // ── Token info ────────────────────────────────────────────────────────────────
 
@@ -160,5 +117,4 @@ async function getEthPrice() {
   }
 }
 
-module.exports = { getLatestBlock, getNewLogs, getTokenInfo, getCreatorTokenCount, getDevBalance, getEthPrice };
-
+module.exports = { getTokenInfo, getCreatorTokenCount, getDevBalance, getEthPrice };

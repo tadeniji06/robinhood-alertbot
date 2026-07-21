@@ -13,8 +13,9 @@ const TOKEN_LAUNCHED_TOPIC =
   '0xdb51ea9ad51ab453a65a4cb7e60c3cb378c9501bb002609f8f97778fb6c4235a';
 
 class PonsListener extends EventEmitter {
-  constructor() {
+  constructor(provider) {
     super();
+    this.provider = provider;
     this.lastBlock  = 0;
     this._running   = false;
     this._seenTxHashes = new Set();
@@ -25,11 +26,14 @@ class PonsListener extends EventEmitter {
     logger.info('PonsListener', `Starting Blockscout polling for ${config.contracts.pons}`);
 
     // Initialise lastBlock to current tip so we only alert on NEW tokens
-    try {
-      this.lastBlock = await blockscout.getLatestBlock();
-      logger.info('PonsListener', `✅ Ready — polling from block ${this.lastBlock}`);
-    } catch (err) {
-      logger.warn('PonsListener', 'Could not get latest block, starting from 0:', err.message);
+    while (!this.lastBlock) {
+      try {
+        this.lastBlock = await this.provider.getBlockNumber();
+        logger.info('PonsListener', `✅ Ready — polling from block ${this.lastBlock}`);
+      } catch (err) {
+        logger.warn('PonsListener', `Could not get latest block (${err.message}), retrying in 5s...`);
+        await sleep(5000);
+      }
     }
 
     this._poll();
@@ -47,35 +51,49 @@ class PonsListener extends EventEmitter {
   }
 
   async _check() {
-    const logs = await blockscout.getNewLogs(config.contracts.pons, this.lastBlock);
+    let latestBlock;
+    try {
+      latestBlock = await this.provider.getBlockNumber();
+    } catch (e) {
+      logger.warn('PonsListener', `RPC getBlockNumber failed: ${e.message}`);
+      return;
+    }
+
+    if (latestBlock <= this.lastBlock) return;
+
+    // Fetch logs directly via RPC, filtering strictly for TokenLaunched to bypass all limits
+    let logs;
+    try {
+      logs = await this.provider.getLogs({
+        address: config.contracts.pons,
+        topics: [TOKEN_LAUNCHED_TOPIC],
+        fromBlock: this.lastBlock + 1,
+        toBlock: latestBlock
+      });
+    } catch (err) {
+      logger.warn('PonsListener', `RPC getLogs failed: ${err.message}`);
+      return;
+    }
+
+    // Update watermark even if no logs, so we don't scan the same empty blocks forever
+    this.lastBlock = latestBlock;
+
     if (!logs.length) return;
 
     for (const log of logs) {
-      // Update watermark
-      if (Number(log.block_number) > this.lastBlock) {
-        this.lastBlock = Number(log.block_number);
-      }
-
-      // Only process TokenLaunched events
-      if (!log.topics || log.topics[0] !== TOKEN_LAUNCHED_TOPIC) continue;
-
-      const txHash = log.transaction_hash;
+      const txHash = log.transactionHash;
       if (!txHash || this._seenTxHashes.has(txHash)) continue;
       this._seenTxHashes.add(txHash);
       if (this._seenTxHashes.size > 500) {
         this._seenTxHashes.delete(this._seenTxHashes.values().next().value);
       }
 
-      // Extract from decoded Blockscout data
-      const decoded = log.decoded;
-      if (!decoded) continue;
+      // Since we bypassed Blockscout, decode the RPC log data manually
+      const tokenAddress   = '0x' + log.topics[1].slice(26);
+      const creatorAddress = '0x' + log.topics[2].slice(26);
 
-      const params = {};
-      for (const p of decoded.parameters || []) params[p.name] = p.value;
-
-      const tokenAddress   = params.token    || log.topics[1]?.replace('0x000000000000000000000000', '0x');
-      const creatorAddress = params.deployer  || log.topics[2]?.replace('0x000000000000000000000000', '0x');
-      const initialBuyAmt  = params.initialBuyAmount || '0';
+      // The unindexed data is initialBuyAmount (uint256)
+      const initialBuyAmt = BigInt(log.data || '0x0').toString();
 
       if (!tokenAddress) continue;
 
@@ -85,7 +103,7 @@ class PonsListener extends EventEmitter {
         tokenAddress,
         creatorAddress,
         txHash,
-        timestamp:         log.block_timestamp || new Date().toISOString(),
+        timestamp:         new Date().toISOString(), // Fallback for RPC
         launchpad:         'Pons',
         initialBuyAmount:  initialBuyAmt,
       });
